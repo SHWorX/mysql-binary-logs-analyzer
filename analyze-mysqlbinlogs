@@ -221,7 +221,7 @@ def decodeAndCombineBinaryLogs(binaryLogs, rawLog):
         Filename incl. path which will contain the decoded content of all given binary logs
     """
 
-    command = ['mysqlbinlog', '-v']
+    command = ['mysqlbinlog', '--base64-output=decode-rows', '-v']
     commandWithFileList = command + binaryLogs
 
     Printer.tool('Decoding binary logs and write the output to {} ... '.format(rawLog), endNewline=False)
