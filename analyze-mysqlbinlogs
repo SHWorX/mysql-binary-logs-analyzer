@@ -1,0 +1,698 @@
+#!/usr/bin/python3
+
+# (C) 2023 Steffen Haase <shworx.development@gmail.com>
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; version 3.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License along with
+# this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+
+import datetime
+import getopt
+import getpass
+import os
+import re
+import subprocess
+import sys
+import time
+
+from packaging.version import parse
+
+
+# ========  CLASSES  ========
+class BColors:
+    """This class contains the color and font formatting (bold, underline) definitions for messages."""
+
+    # ==== COLORS ====
+    WARNING = '\033[93m'  # light yellow
+    """Light yellow"""
+
+    ERROR = '\033[91m'  # light red
+    """Light red"""
+
+    BLUE = '\033[34m'
+    LIGHTBLUE = '\033[94m'
+    LIGHTGREEN = '\033[92m'
+    CYAN = '\033[36m'
+    DEFAULTCOLOR = '\033[39m'
+
+    # ==== STYLES ====
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    DEFAULT = '\033[0m'
+
+
+class Printer:
+    """Provides methods to print out formatted/colored messages."""
+
+    @staticmethod
+    def error(msg, bold=False, prefix=True, startNewline=False, endNewline=True):
+        """Prints an error message (light red).
+
+        Parameter
+        ---------
+        msg : str
+            The message to print.
+        bold : bool, default: False
+            Shall the msg printed in bold text.
+        prefix : bool, default: True
+            Shall the message have the prefix "ERROR: ".
+        startNewline : bool, default: False
+            Shall the message begin with a newline character
+        endNewline : bool, default: True
+            Shall the message end with a newline character
+        """
+
+        output = BColors.ERROR + msg + BColors.DEFAULT
+        output = BColors.BOLD + output + BColors.DEFAULT if bold else output
+        output = BColors.ERROR + BColors.BOLD + "ERROR: " + BColors.DEFAULT + output if prefix else output
+        output = "\n" + output if startNewline else output
+        if endNewline:
+            print(output)
+        else:
+            print(output, end="")
+
+    @staticmethod
+    def warning(msg, bold=False, prefix=True, startNewline=False, endNewline=True):
+        """Prints a warning message (light yellow).
+
+        Parameter
+        ---------
+        msg : str
+            The message to print.
+        bold : bool, default: False
+            Shall the msg printed in bold text.
+        prefix : bool, default: True
+            Shall the message have the prefix "WARNING: ".
+        startNewline : bool, default: False
+            Shall the message begin with a newline character
+        endNewline : bool, default: True
+            Shall the message end with a newline character
+        """
+        output = BColors.WARNING + msg + BColors.DEFAULT
+        output = BColors.BOLD + output + BColors.DEFAULT if bold else output
+        output = BColors.WARNING + BColors.BOLD + "WARNING: " + BColors.DEFAULT + output if prefix else output
+        output = "\n" + output if startNewline else output
+        if endNewline:
+            print(output)
+        else:
+            print(output, end="")
+
+    @staticmethod
+    def success(msg, bold=False, startNewline=False, endNewline=True):
+        """Prints a success message (green).
+
+        Parameter
+        ---------
+        msg : str
+            The message to print.
+        bold : bool, default: False
+            Shall the msg printed in bold text.
+        prefix : bool, default: True
+            Shall the message have the prefix "ERROR: ".
+        startNewline : bool, default: False
+            Shall the message begin with a newline character
+        endNewline : bool, default: True
+            Shall the message end with a newline character
+        """
+        output = BColors.LIGHTGREEN + msg + BColors.DEFAULT
+        output = BColors.BOLD + output + BColors.DEFAULT if bold else output
+        output = "\n" + output if startNewline else output
+        if endNewline:
+            print(output)
+        else:
+            print(output, end="")
+
+    @staticmethod
+    def tool(msg, bold=False, startNewline=False, endNewline=True):
+        """Prints a tool message (cyan).
+
+        Parameter
+        ---------
+        msg : str
+            The message to print.
+        bold : bool, default: False
+            Shall the msg printed in bold text.
+        startNewline : bool, default: False
+            Shall the message begin with a newline character
+        endNewline : bool, default: True
+            Shall the message end with a newline character
+        """
+        output = BColors.CYAN + msg + BColors.DEFAULT
+        output = BColors.BOLD + output + BColors.DEFAULT if bold else output
+        output = "\n" + output if startNewline else output
+        if endNewline:
+            print(output)
+        else:
+            print(output, end="")
+
+    @staticmethod
+    def default(msg, bold=False, startNewline=False, endNewline=True):
+        """Prints message (default color).
+
+        Parameter
+        ---------
+        msg : str
+            The message to print.
+        bold : bool, default: False
+            Shall the msg printed in bold text.
+        startNewline : bool, default: False
+            Shall the message begin with a newline character
+        endNewline : bool, default: True
+            Shall the message end with a newline character
+        """
+        output = BColors.BOLD + msg + BColors.DEFAULT if bold else msg
+        output = "\n" + output if startNewline else output
+        if endNewline:
+            print(output)
+        else:
+            print(output, end="")
+# ========  END OF CLASSES  ========
+
+
+# ========  FUNCTIONS  ========
+def getModifiedDateTime(file):
+    """Returns the mtime of the file.
+
+    Parameter
+    ---------
+    file: str
+
+    Returns
+    -------
+    datetime : datetime
+    """
+
+    return datetime.datetime.fromtimestamp(os.path.getmtime(file))
+
+
+def getCreatedDateTime(file):
+    """Returns the ctime of the file.
+
+    Parameter
+    ---------
+    file: str
+
+    Returns
+    -------
+    datetime : datetime
+    """
+
+    return datetime.datetime.fromtimestamp(os.path.getctime(file))
+
+
+def decodeAndCombineBinaryLogs(binaryLogs, rawLog):
+    """This method calls the "mysqlbinlog" command with the option "-v" and the binary logs as arguments,
+    and writes the output to "/output/path/mysql-raw.out".
+
+    Parameter
+    ---------
+    binaryLogs : list[str]
+        List of binary logs
+    outputFile : str
+        Filename incl. path which will contain the decoded content of all given binary logs
+    """
+
+    command = ['mysqlbinlog', '-v']
+    commandWithFileList = command + binaryLogs
+
+    Printer.tool('Decoding binary logs and write the output to {} ... '.format(rawLog), endNewline=False)
+
+    try:
+        with open(rawLog, 'w') as outputFileHandle:
+            subprocess.run(
+                commandWithFileList,
+                check=True,
+                stdout=outputFileHandle,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+        outputFileHandle.close()
+    except IOError as e:
+        Printer.error('Failed!\n{}: {}'.format(e.strerror, rawLog), prefix=False)
+        sys.exit(1)
+    except subprocess.CalledProcessError as e:
+        Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
+        sys.exit(1)
+    else:
+        Printer.success('Done!')
+
+
+def checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath):
+    """Checks the given initial working parameters for valid values, prints out (and returns) the final working
+    parameter list
+
+    Parameters
+    ----------
+    dtFrom : str
+        The start date/datetime/timestamp. Allowed formats: YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, Unix timestamp
+    dtTo : str
+        The end date/datetime/timestamp.  Allowed formats: YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, Unix timestamp
+    binaryLogsFilePath : str
+        The path where the binary logs file are located. (default: /var/lib/mysql)
+    binaryLogsFileName : str
+        The name of the binary log files without extension. (default: binlog)
+    outputPath : str
+        The path where the output files shall be saved. (default: /var/lib/mysql)
+
+    Returns
+    -------
+    list
+        A list with the final working parameters:
+        [
+            dtFrom : datetime
+            dtTo : datetime
+            binaryLogsFilePath : str
+            binaryLogsFileName : str
+            outputFilePath : str
+        ]
+    """
+
+    Printer.tool('Checking working parameters ...')
+    currentUser = getpass.getuser()
+    regexDate = re.compile(r'\d{4}-\d{2}-\d{2}')
+    regexDateTime = re.compile(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}')
+    regexTimestamp = re.compile(r'\d{10}')
+    dtNow = datetime.datetime.now()
+    startOfDay = dtNow.replace(hour=0, minute=0, second=0, microsecond=0)
+    endOfDay = startOfDay + datetime.timedelta(hours=23, minutes=59, seconds=59)
+
+    # Check if start datetime is given in expected formats, otherwise use current day as start
+    if regexDate.match(dtFrom) or regexDateTime.match(dtFrom) or regexTimestamp.match(dtFrom):
+        try:
+            dtFrom = (datetime.datetime.strptime(dtFrom, '%Y-%m-%d')
+                      .replace(hour=0, minute=0, second=0, microsecond=0))
+        except ValueError:
+            try:
+                dtFrom = datetime.datetime.strptime(dtFrom, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                try:
+                    dtFrom = datetime.datetime.fromtimestamp(int(dtFrom))
+                except ValueError:
+                    Printer.error('Invalid start datetime value "{}" given!'.format(dtFrom))
+                    sys.exit(1)
+    else:
+        dtFrom = startOfDay
+
+    # Check if end datetime is given in expected formats, otherwise use current day as end
+    if regexDate.match(dtTo) or regexDateTime.match(dtTo) or regexTimestamp.match(dtTo):
+        try:
+            dtToObject = (datetime.datetime.strptime(dtTo, '%Y-%m-%d')
+                          .replace(hour=0, minute=0, second=0, microsecond=0))
+            dtTo = dtToObject + datetime.timedelta(hours=23, minutes=59, seconds=59)
+        except ValueError:
+            try:
+                dtTo = datetime.datetime.strptime(dtTo, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                try:
+                    dtTo = datetime.datetime.fromtimestamp(int(dtTo))
+                except ValueError:
+                    Printer.error('Invalid end datetime value "{}" given!'.format(dtTo))
+                    sys.exit(1)
+    else:
+        dtTo = endOfDay
+
+    if dtFrom > dtTo:
+        Printer.error(
+            'The start datetime "{}" can not be greater than the end datetime {}'
+            .format(dtTo.strftime('%Y-%m-%d %H:%M:%S'), dtFrom.strftime('%Y-%m-%d %H:%M:%S'))
+        )
+        sys.exit(1)
+
+    # If no binary log files path is given, we use the default path
+    if binaryLogsFilePath == '':
+        binaryLogsFilePath = '/var/lib/mysql/'
+
+    # Check if the given binary logs file path is the filesystem root (not allowed!)
+    if len(binaryLogsFilePath) == 1 and binaryLogsFilePath[0] == '/':
+        Printer.error('The binary logs file path "{}" can\'t be the filesystem root!'.format(binaryLogsFilePath))
+        sys.exit(1)
+
+    # Add slash at the end of path if not exist
+    if binaryLogsFilePath[len(binaryLogsFilePath) - 1] != '/':
+        binaryLogsFilePath = binaryLogsFilePath + '/'
+
+    # Check if path exists and readable by current user
+    if not os.path.exists(binaryLogsFilePath) or not os.access(binaryLogsFilePath, os.R_OK):
+        Printer.error(
+            'The binary logs file path "{}" does not exist, or is not readable by the current user "{}"!'
+            .format(binaryLogsFilePath, currentUser)
+        )
+        sys.exit(1)
+
+    # If no binary logs file name is given, we use the default file name
+    if binaryLogsFileName == '':
+        binaryLogsFileName = 'mysql-bin'
+
+    # Output path checks
+    if outputPath == '':
+        # If path is empty, we use the current working directory as path
+        outputFilePath = os.getcwd() + '/'
+    elif outputPath[len(outputPath) - 1] != '/':
+        # Add / at the end of path if not exist
+        outputFilePath = outputPath + '/'
+    else:
+        outputFilePath = outputPath
+
+    if outputFilePath == '/':
+        Printer.error('The output path "{}" can\'t be the filesystem root!'.format(outputFilePath))
+        sys.exit(1)
+
+    if not os.path.exists(outputFilePath) or not os.access(outputFilePath, os.W_OK):
+        Printer.error(
+            'The output path "{}" does not exist, or is not writable by the current user "{}"!'
+            .format(outputFilePath, currentUser)
+        )
+        sys.exit(1)
+
+    Printer.default('+---------------------------------------------------+\n'
+                    '|  F I N A L   W O R K I N G   P A R A M E T E R S  |\n'
+                    '+---------------------------------------------------+')
+    Printer.default('Datetime from:\t\t\t\t\t{}\n'
+                    'Datetime to:\t\t\t\t\t{}\n'
+                    'Binary logs path:\t\t\t\t{}\n'
+                    'Binary logs filename (without extension):\t{}\n'
+                    'Output path:\t\t\t\t\t{}'
+                    .format(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputFilePath))
+    Printer.default('=====================================================')
+
+    return [
+        dtFrom,
+        dtTo,
+        binaryLogsFilePath,
+        binaryLogsFileName,
+        outputFilePath,
+    ]
+
+
+def getBinaryLogs(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName):
+    """Find all binary logs modified between dtFrom and dtTo and returns the findings in a sorted list.
+
+    Parameter
+    ---------
+    dtFrom : datetime
+        The start datetime.
+    dtTo : datetime
+        The end datetime.
+    binaryLogsFilePath : str
+        The path where the binary logs are located.
+    binaryLogsFileName : str
+        The name of the binary logs without extension.
+
+    Returns
+    -------
+    list :
+        List of matching binary logs.
+    """
+
+    Printer.tool('Searching for matching binary logs ...')
+    binaryLogs = []
+    # Regex pattern for ^<filename>.<number>$
+    regex = re.compile(r'^' + re.escape(binaryLogsFileName) + r'\.[0-9]*$')
+
+    # Getting all matching binary logs
+    for root, dirs, files in os.walk(binaryLogsFilePath):
+        for file in files:
+            if regex.match(file):
+                fileWithPath = root + file
+                if dtFrom <= getModifiedDateTime(fileWithPath) <= dtTo:
+                    binaryLogs.append(fileWithPath)
+
+    if not binaryLogs:
+        Printer.warning('No matching binary log files found! Abort script execution.', prefix=False)
+        sys.exit(0)
+
+    # Return sorted list
+    return sorted(binaryLogs, key=parse)
+
+
+def writeFileList(binaryLogs, outputFile):
+    """Writes the matching binary log file names (incl. path) to a file.
+
+    Parameter
+    ---------
+    binaryLogs : list[str]
+        List with the matching binary log filenames (incl. path).
+    outputFile : str
+        Filename (incl. patch) to where to write the list of files.
+    """
+
+    Printer.tool('Writing list of binary logs found to ' + outputFile + ' ... ', endNewline=False)
+    try:
+        with open(outputFile, 'w') as txtFile:
+            for line in binaryLogs:
+                txtFile.write(line + '\n')
+        txtFile.close()
+        Printer.success('Done!')
+    except IOError as e:
+        Printer.error('Can\'t write to "{}"! {}'.format(outputFile, e.strerror), startNewline=True)
+        sys.exit(1)
+
+
+def createReport(rawLog, reportFile):
+    """Reads the previously created combined binary logs file (mysql-raw.out), look up and count UPDATE, INSERT and
+    DELETE operations, and writes the result to the report file (binary-logs-report.txt).
+
+    Parameter
+    ---------
+    rawLog : str
+        Combined RAW binary log file (created by decodeAndCombineBinaryLogFiles())
+    reportFile: str
+        File to where the report shall be written.
+    """
+
+    Printer.tool('Begin analyzing combined binary logs file and create report ...')
+    if not os.access(rawLog, os.R_OK):
+        Printer.error('File {} is not readable by current user {}!'.format(rawLog, getpass.getuser()))
+        sys.exit(1)
+    with open(reportFile, 'w') as reportFileHandle:
+        Printer.default(
+            'Look up and count UPDATE operations, and add result to the report file ... ',
+            endNewline=False
+        )
+        try:
+            reportFileHandle.write('UPDATE Operations\n==============================\n')
+            reportFileHandle.flush()
+            subprocess.run(
+                'cat "' + rawLog + '" | grep "UPDATE " | sort | uniq -c',
+                check=True,
+                shell=True,
+                stdout=reportFileHandle,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+        except subprocess.CalledProcessError as e:
+            Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
+            sys.exit(1)
+        else:
+            Printer.success('Done!')
+            reportFileHandle.flush()
+
+        Printer.default(
+            'Look up and count INSERT operations, and add result to the report file ... ',
+            endNewline=False
+        )
+        try:
+            reportFileHandle.write('\nINSERT Operations\n==============================\n')
+            reportFileHandle.flush()
+            subprocess.run(
+                'cat ' + rawLog + ' | grep "INSERT INTO" | sort | uniq -c',
+                check=True,
+                shell=True,
+                stdout=reportFileHandle,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+        except subprocess.CalledProcessError as e:
+            Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
+            sys.exit(1)
+        else:
+            Printer.success('Done!')
+            reportFileHandle.flush()
+
+        Printer.default(
+            'Look up and count DELETE operations, and add result to the report file ... ',
+            endNewline=False
+        )
+        try:
+            reportFileHandle.write('\nDELETE Operations\n==============================\n')
+            reportFileHandle.flush()
+            subprocess.run(
+                'cat ' + rawLog + ' | grep "DELETE FROM" | sort | uniq -c',
+                check=True,
+                shell=True,
+                stdout=reportFileHandle,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+        except subprocess.CalledProcessError as e:
+            Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
+            sys.exit(1)
+        else:
+            Printer.success('Done!')
+            reportFileHandle.flush()
+
+        Printer.default(
+            'Look up and count TRUNCATE operations, and add result to the report file ... ',
+            endNewline=False
+        )
+        try:
+            reportFileHandle.write('\nTRUNCATE Operations\n==============================\n')
+            reportFileHandle.flush()
+            subprocess.run(
+                'cat ' + rawLog + ' | grep "TRUNCATE " | sort | uniq -c',
+                check=True,
+                shell=True,
+                stdout=reportFileHandle,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+        except subprocess.CalledProcessError as e:
+            Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
+            sys.exit(1)
+        else:
+            Printer.success('Done!')
+            reportFileHandle.flush()
+
+        Printer.default(
+            'Look up and count DROP operations, and add result to the report file ... ',
+            endNewline=False
+        )
+        try:
+            reportFileHandle.write('\nDROP Operations\n==============================\n')
+            reportFileHandle.flush()
+            subprocess.run(
+                'cat ' + rawLog + ' | grep "DROP " | sort | uniq -c',
+                check=True,
+                shell=True,
+                stdout=reportFileHandle,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+        except subprocess.CalledProcessError as e:
+            Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
+            sys.exit(1)
+        else:
+            Printer.success('Done!')
+            reportFileHandle.flush()
+
+    reportFileHandle.close()
+
+
+def removeRawLogAndPrintFinalMessage(rawLog):
+    """Deletes the combined raw binary log file
+
+    Parameter
+    ---------
+    rawLog : str
+        Combined RAW binary log file (created by decodeAndCombineBinaryLogFiles())
+    """
+
+    Printer.tool('Deleting combined raw log file ... ', endNewline=False)
+    try:
+        os.unlink(rawLog)
+    except OSError as e:
+        Printer.error('Failed!\n{}'.format(e.strerror), prefix=False)
+    else:
+        Printer.success('Done!')
+
+
+def run(dtFrom: str, dtTo: str, binaryLogsFilePath: str, binaryLogsFileName: str, outputPath: str):
+    """Wrapper method which calls other methods"""
+
+    params = checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath)
+    binaryLogs = getBinaryLogs(params[0], params[1], params[2], params[3])
+
+    currentDate = datetime.date.today().strftime('%Y-%m-%d')
+    currentTimeStamp = str(int(time.time()))
+
+    rawLogFile = params[4] + 'mysql-raw.log'
+    reportFile = params[4] + currentDate + '_' + currentTimeStamp + '_binary-logs-report.txt'
+    fileListFile = params[4] + currentDate + '_' + currentTimeStamp + '_binary-logs-list.txt'
+
+    writeFileList(binaryLogs, fileListFile)
+    decodeAndCombineBinaryLogs(binaryLogs, rawLogFile)
+    createReport(rawLogFile, reportFile)
+    removeRawLogAndPrintFinalMessage(rawLogFile)
+
+    Printer.success('All operations successfully executed!')
+    Printer.default('Matched binary log files list: ' + fileListFile)
+    Printer.default('Generated report file: ' + reportFile + '\n')
+
+# ========  END OF FUNCTIONS  ========
+
+
+# ======== MAIN LOGIC ========
+def main(argv):
+    """Defines some default values for the working parameters, contains the logic for options and help, and shows the
+    initial working parameters."""
+
+    dtFrom = ''
+    dtTo = ''
+    binaryLogsFileName = ''
+    binaryLogsFilePath = ''
+    outputPath = ''
+
+    opts, args = getopt.getopt(
+        argv,
+        'hf:t:n:p:o:',
+        ['dt-from=', 'dt-to', 'binary-logs-file-name=', 'binary-logs-file-path=', 'output-file=']
+    )
+
+    for opt, arg in opts:
+        if opt == '-h':
+            Printer.default('USAGE: analyze-mysql-binlogs --dt-from=<datetime> --dt-end=<datetime> '
+                            '--binary-logs-file-name=<file-name-without-extension> --binary-logs-file-path=<path> '
+                            '--output-path=<output-path>')
+            Printer.default('-h\t\t\t\t\t\tShows this help')
+            Printer.default('-f\t--dt-from=<datetime>\t\t\tThe start date(time) the binary logs are created to '
+                            'analyze (allowed formats: YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, Unix timestamp)')
+            Printer.default('\t\t\t\t\t\tIf given as YYYY-MM-DD, then the start datetime will be: YYYY-MM-DD 00:00:00.')
+            Printer.default('\t\t\t\t\t\tIf omitted, the start datetime will be the current date at 00:00:00.')
+            Printer.default('-t\t--dt-to=<datetime>\t\t\tThe end date(time) the binary logs are created to analyze ('
+                            'allowed formats: YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, Unix timestamp)')
+            Printer.default('\t\t\t\t\t\tIf given as YYYY-MM-DD, then the end datetime will be: YYYY-MM-DD 23:59:59')
+            Printer.default('\t\t\t\t\t\tIf omitted, the end datetime will be the current date at 23:59:59.')
+            Printer.default('-n\t--binary-logs-file-name=<name>\t\tThe name the MySQL binary log files without the '
+                            'file extension (default: main-web-server-bin')
+            Printer.default('-p\t--binary-logs-file-path=<path>\t\tThe path where the MySQL binary logs are (default: '
+                            '/var/lib/mysql/)')
+            Printer.default('-o\t--output-path=<output-path>\t\tThe path where the output files are saved (default: '
+                            '<current-directory>')
+            sys.exit()
+        elif opt in ('-f', '--dt-from'):
+            dtFrom = arg
+        elif opt in ('-t', '--dt-to'):
+            dtTo = arg
+        elif opt in ('-n', '--binary-logs-file-name'):
+            binaryLogsFileName = arg
+        elif opt in ('-p', '--binary-logs-file-path'):
+            binaryLogsFilePath = arg
+        elif opt in ('-o', '--output-path'):
+            outputPath = arg
+
+    Printer.default('+---------------------------------------------------+\n'
+                    '|  G I V E N   W O R K I N G   P A R A M E T E R S  |\n'
+                    '+---------------------------------------------------+')
+    Printer.default('Datetime from:\t\t\t\t\t{}\n'
+                    'Datetime to:\t\t\t\t\t{}\n'
+                    'Binary logs path:\t\t\t\t{}\n'
+                    'Binary logs filename (without extension):\t{}\n'
+                    'Output path:\t\t\t\t\t\t{}'
+                    .format(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath))
+    Printer.default('=====================================================')
+
+    run(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath)
+# ======== END MAIN LOGIC ========
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
