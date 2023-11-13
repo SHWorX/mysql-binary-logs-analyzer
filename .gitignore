@@ -1,3 +1,4 @@
 .idea
 /venv/
 /tests
+mysql-raw.log
