@@ -270,15 +270,8 @@ def checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName,
     list
         A list with the final working parameters:
 
-        [
-            dtFrom : datetime,
-            dtTo : datetime,
-            binaryLogsFilePath : str,
-            binaryLogsFileName : str,
-            outputFilePath : str,
-            sqlOperations : str,
-            binlogFormat : str
-        ]
+        [dtFrom : datetime, dtTo : datetime, binaryLogsFilePath : str, binaryLogsFileName : str, outputFilePath :
+        str, sqlOperations : str, binlogFormat : str]
     """
 
     Printer.tool('Checking working parameters ...')
