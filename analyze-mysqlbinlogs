@@ -700,7 +700,7 @@ def main(argv):
         if opt == '-h':
             Printer.default('USAGE: analyze-mysql-binlogs --dt-from=<datetime> --dt-end=<datetime> '
                             '--binary-logs-file-name=<file-name-without-extension> --binary-logs-file-path=<path> '
-                            '--output-path=<output-path>')
+                            '--output-path=<output-path> --sql-operations=<operations>')
             Printer.default('-h\t\t\t\t\t\tShows this help')
             Printer.default('-f\t--dt-from=<datetime>\t\t\tThe start date(time) the binary logs are created to '
                             'analyze (allowed formats: YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, Unix timestamp)')
