@@ -246,7 +246,7 @@ def decodeAndCombineBinaryLogs(binaryLogs, rawLog):
         Printer.success('Done!')
 
 
-def checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath):
+def checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath, sqlOperations):
     """Checks the given initial working parameters for valid values, prints out (and returns) the final working
     parameter list
 
@@ -262,17 +262,22 @@ def checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName,
         The name of the binary log files without extension. (default: binlog)
     outputPath : str
         The path where the output files shall be saved. (default: /var/lib/mysql)
+    sqlOperations : str
+        The SQL operations which should be taken into the report (default: all)
 
     Returns
     -------
     list
         A list with the final working parameters:
+
         [
-            dtFrom : datetime
-            dtTo : datetime
-            binaryLogsFilePath : str
-            binaryLogsFileName : str
-            outputFilePath : str
+            dtFrom : datetime,
+            dtTo : datetime,
+            binaryLogsFilePath : str,
+            binaryLogsFileName : str,
+            outputFilePath : str,
+            sqlOperations : str,
+            binlogFormat : str
         ]
     """
 
@@ -284,6 +289,7 @@ def checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName,
     dtNow = datetime.datetime.now()
     startOfDay = dtNow.replace(hour=0, minute=0, second=0, microsecond=0)
     endOfDay = startOfDay + datetime.timedelta(hours=23, minutes=59, seconds=59)
+    allowedOperations = ['all', 'update', 'insert', 'delete', 'drop', 'truncate']
 
     # Check if start datetime is given in expected formats, otherwise use current day as start
     if regexDate.match(dtFrom) or regexDateTime.match(dtFrom) or regexTimestamp.match(dtFrom):
@@ -373,6 +379,18 @@ def checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName,
         )
         sys.exit(1)
 
+    if sqlOperations == '':
+        sqlOperations = 'all'
+    elif ',' in sqlOperations:
+        sqlOperations = sqlOperations.lower()
+        for operation in sqlOperations.split(','):
+            if operation not in allowedOperations:
+                Printer.error('Unknown SQL operation "{}"!'.format(operation))
+                sys.exit(1)
+    elif sqlOperations not in allowedOperations:
+        Printer.error('Unknown SQL operation "{}"!'.format(sqlOperations))
+        sys.exit(1)
+
     Printer.default('+---------------------------------------------------+\n'
                     '|  F I N A L   W O R K I N G   P A R A M E T E R S  |\n'
                     '+---------------------------------------------------+')
@@ -380,8 +398,9 @@ def checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName,
                     'Datetime to:\t\t\t\t\t{}\n'
                     'Binary logs path:\t\t\t\t{}\n'
                     'Binary logs filename (without extension):\t{}\n'
-                    'Output path:\t\t\t\t\t{}'
-                    .format(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputFilePath))
+                    'Output path:\t\t\t\t\t{}\n'
+                    'SQL operations:\t\t\t\t\t{}'
+                    .format(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputFilePath, sqlOperations))
     Printer.default('=====================================================')
 
     return [
@@ -390,6 +409,7 @@ def checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName,
         binaryLogsFilePath,
         binaryLogsFileName,
         outputFilePath,
+        sqlOperations
     ]
 
 
@@ -457,7 +477,7 @@ def writeFileList(binaryLogs, outputFile):
         sys.exit(1)
 
 
-def createReport(rawLog, reportFile):
+def createReport(rawLog, reportFile, sqlOperations):
     """Reads the previously created combined binary logs file (mysql-raw.out), look up and count UPDATE, INSERT and
     DELETE operations, and writes the result to the report file (binary-logs-report.txt).
 
@@ -474,115 +494,120 @@ def createReport(rawLog, reportFile):
         Printer.error('File {} is not readable by current user {}!'.format(rawLog, getpass.getuser()))
         sys.exit(1)
     with open(reportFile, 'w') as reportFileHandle:
-        Printer.default(
-            'Look up and count UPDATE operations, and add result to the report file ... ',
-            endNewline=False
-        )
-        try:
-            reportFileHandle.write('UPDATE Operations\n==============================\n')
-            reportFileHandle.flush()
-            subprocess.run(
-                'cat "' + rawLog + '" | grep "UPDATE " | sort | uniq -c',
-                check=True,
-                shell=True,
-                stdout=reportFileHandle,
-                stderr=subprocess.PIPE,
-                universal_newlines=True
+        if any(ele in sqlOperations for ele in ['all', 'update']):
+            Printer.default(
+                'Look up and count UPDATE operations, and add result to the report file ... ',
+                endNewline=False
             )
-        except subprocess.CalledProcessError as e:
-            Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
-            sys.exit(1)
-        else:
-            Printer.success('Done!')
-            reportFileHandle.flush()
+            try:
+                reportFileHandle.write('UPDATE Operations\n==============================\n')
+                reportFileHandle.flush()
+                subprocess.run(
+                    'cat "' + rawLog + '" | grep -E "^(UPDATE|### UPDATE)" | sort | uniq -c',
+                    check=True,
+                    shell=True,
+                    stdout=reportFileHandle,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True
+                )
+            except subprocess.CalledProcessError as e:
+                Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
+                sys.exit(1)
+            else:
+                Printer.success('Done!')
+                reportFileHandle.flush()
 
-        Printer.default(
-            'Look up and count INSERT operations, and add result to the report file ... ',
-            endNewline=False
-        )
-        try:
-            reportFileHandle.write('\nINSERT Operations\n==============================\n')
-            reportFileHandle.flush()
-            subprocess.run(
-                'cat ' + rawLog + ' | grep "INSERT INTO" | sort | uniq -c',
-                check=True,
-                shell=True,
-                stdout=reportFileHandle,
-                stderr=subprocess.PIPE,
-                universal_newlines=True
+        if any(ele in sqlOperations for ele in ['all', 'insert']):
+            Printer.default(
+                'Look up and count INSERT operations, and add result to the report file ... ',
+                endNewline=False
             )
-        except subprocess.CalledProcessError as e:
-            Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
-            sys.exit(1)
-        else:
-            Printer.success('Done!')
-            reportFileHandle.flush()
+            try:
+                reportFileHandle.write('\nINSERT Operations\n==============================\n')
+                reportFileHandle.flush()
+                subprocess.run(
+                    'cat ' + rawLog + ' | grep -E "^(INSERT|### INSERT)" | sort | uniq -c',
+                    check=True,
+                    shell=True,
+                    stdout=reportFileHandle,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True
+                )
+            except subprocess.CalledProcessError as e:
+                Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
+                sys.exit(1)
+            else:
+                Printer.success('Done!')
+                reportFileHandle.flush()
 
-        Printer.default(
-            'Look up and count DELETE operations, and add result to the report file ... ',
-            endNewline=False
-        )
-        try:
-            reportFileHandle.write('\nDELETE Operations\n==============================\n')
-            reportFileHandle.flush()
-            subprocess.run(
-                'cat ' + rawLog + ' | grep "DELETE FROM" | sort | uniq -c',
-                check=True,
-                shell=True,
-                stdout=reportFileHandle,
-                stderr=subprocess.PIPE,
-                universal_newlines=True
+        if any(ele in sqlOperations for ele in ['all', 'delete']):
+            Printer.default(
+                'Look up and count DELETE operations, and add result to the report file ... ',
+                endNewline=False
             )
-        except subprocess.CalledProcessError as e:
-            Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
-            sys.exit(1)
-        else:
-            Printer.success('Done!')
-            reportFileHandle.flush()
+            try:
+                reportFileHandle.write('\nDELETE Operations\n==============================\n')
+                reportFileHandle.flush()
+                subprocess.run(
+                    'cat ' + rawLog + ' | grep -E "^(DELETE|### DELETE)" | sort | uniq -c',
+                    check=True,
+                    shell=True,
+                    stdout=reportFileHandle,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True
+                )
+            except subprocess.CalledProcessError as e:
+                Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
+                sys.exit(1)
+            else:
+                Printer.success('Done!')
+                reportFileHandle.flush()
 
-        Printer.default(
-            'Look up and count TRUNCATE operations, and add result to the report file ... ',
-            endNewline=False
-        )
-        try:
-            reportFileHandle.write('\nTRUNCATE Operations\n==============================\n')
-            reportFileHandle.flush()
-            subprocess.run(
-                'cat ' + rawLog + ' | grep "TRUNCATE " | sort | uniq -c',
-                check=True,
-                shell=True,
-                stdout=reportFileHandle,
-                stderr=subprocess.PIPE,
-                universal_newlines=True
+        if any(ele in sqlOperations for ele in ['all', 'truncate']):
+            Printer.default(
+                'Look up and count TRUNCATE operations, and add result to the report file ... ',
+                endNewline=False
             )
-        except subprocess.CalledProcessError as e:
-            Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
-            sys.exit(1)
-        else:
-            Printer.success('Done!')
-            reportFileHandle.flush()
+            try:
+                reportFileHandle.write('\nTRUNCATE Operations\n==============================\n')
+                reportFileHandle.flush()
+                subprocess.run(
+                    'cat ' + rawLog + ' | grep -E "^(TRUNCATE|### TRUNCATE)" | sort | uniq -c',
+                    check=True,
+                    shell=True,
+                    stdout=reportFileHandle,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True
+                )
+            except subprocess.CalledProcessError as e:
+                Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
+                sys.exit(1)
+            else:
+                Printer.success('Done!')
+                reportFileHandle.flush()
 
-        Printer.default(
-            'Look up and count DROP operations, and add result to the report file ... ',
-            endNewline=False
-        )
-        try:
-            reportFileHandle.write('\nDROP Operations\n==============================\n')
-            reportFileHandle.flush()
-            subprocess.run(
-                'cat ' + rawLog + ' | grep "DROP " | sort | uniq -c',
-                check=True,
-                shell=True,
-                stdout=reportFileHandle,
-                stderr=subprocess.PIPE,
-                universal_newlines=True
+        if any(ele in sqlOperations for ele in ['all', 'drop']):
+            Printer.default(
+                'Look up and count DROP operations, and add result to the report file ... ',
+                endNewline=False
             )
-        except subprocess.CalledProcessError as e:
-            Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
-            sys.exit(1)
-        else:
-            Printer.success('Done!')
-            reportFileHandle.flush()
+            try:
+                reportFileHandle.write('\nDROP Operations\n==============================\n')
+                reportFileHandle.flush()
+                subprocess.run(
+                    'cat ' + rawLog + ' | grep -E "^(DROP|### DROP)" | sort | uniq -c',
+                    check=True,
+                    shell=True,
+                    stdout=reportFileHandle,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True
+                )
+            except subprocess.CalledProcessError as e:
+                Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
+                sys.exit(1)
+            else:
+                Printer.success('Done!')
+                reportFileHandle.flush()
 
     reportFileHandle.close()
 
@@ -605,10 +630,26 @@ def removeRawLogAndPrintFinalMessage(rawLog):
         Printer.success('Done!')
 
 
-def run(dtFrom: str, dtTo: str, binaryLogsFilePath: str, binaryLogsFileName: str, outputPath: str):
-    """Wrapper method which calls other methods"""
+def run(dtFrom: str, dtTo: str, binaryLogsFilePath: str, binaryLogsFileName: str, outputPath: str, sqlOperations: str):
+    """Wrapper method which calls other methods
 
-    params = checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath)
+    Parameters
+    ----------
+    dtFrom : str
+        The start date/datetime/timestamp. Allowed formats: YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, Unix timestamp
+    dtTo : str
+        The end date/datetime/timestamp.  Allowed formats: YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, Unix timestamp
+    binaryLogsFilePath : str
+        The path where the binary logs file are located. (default: /var/lib/mysql)
+    binaryLogsFileName : str
+        The name of the binary log files without extension. (default: binlog)
+    outputPath : str
+        The path where the output files shall be saved. (default: /var/lib/mysql)
+    sqlOperations : str
+        The SQL operations which should be taken into the report (default: all)
+    """
+
+    params = checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath, sqlOperations)
     binaryLogs = getBinaryLogs(params[0], params[1], params[2], params[3])
 
     currentDate = datetime.date.today().strftime('%Y-%m-%d')
@@ -620,7 +661,7 @@ def run(dtFrom: str, dtTo: str, binaryLogsFilePath: str, binaryLogsFileName: str
 
     writeFileList(binaryLogs, fileListFile)
     decodeAndCombineBinaryLogs(binaryLogs, rawLogFile)
-    createReport(rawLogFile, reportFile)
+    createReport(rawLogFile, reportFile, params[5])
     removeRawLogAndPrintFinalMessage(rawLogFile)
 
     Printer.success('All operations successfully executed!')
@@ -640,11 +681,19 @@ def main(argv):
     binaryLogsFileName = ''
     binaryLogsFilePath = ''
     outputPath = ''
+    sqlOperations = ''
 
     opts, args = getopt.getopt(
         argv,
-        'hf:t:n:p:o:',
-        ['dt-from=', 'dt-to', 'binary-logs-file-name=', 'binary-logs-file-path=', 'output-file=']
+        'hf:t:n:p:o:s:l:',
+        [
+            'dt-from=',
+            'dt-to=',
+            'binary-logs-file-name=',
+            'binary-logs-file-path=',
+            'output-file=',
+            'sql-operations=',
+        ]
     )
 
     for opt, arg in opts:
@@ -662,11 +711,15 @@ def main(argv):
             Printer.default('\t\t\t\t\t\tIf given as YYYY-MM-DD, then the end datetime will be: YYYY-MM-DD 23:59:59')
             Printer.default('\t\t\t\t\t\tIf omitted, the end datetime will be the current date at 23:59:59.')
             Printer.default('-n\t--binary-logs-file-name=<name>\t\tThe name the MySQL binary log files without the '
-                            'file extension (default: main-web-server-bin')
+                            'file extension (default: mysql-bin)')
             Printer.default('-p\t--binary-logs-file-path=<path>\t\tThe path where the MySQL binary logs are (default: '
                             '/var/lib/mysql/)')
             Printer.default('-o\t--output-path=<output-path>\t\tThe path where the output files are saved (default: '
-                            '<current-directory>')
+                            '<current-directory>)')
+            Printer.default('-s\t--sql-operations=<operations>\t\tThe SQL operations which shall be included in the '
+                            'report (default: all)')
+            Printer.default('\t\t\t\t\t\tMultiple types should be separated by comma. '
+                            'Example: --sql-operations=update,insert,delete')
             sys.exit()
         elif opt in ('-f', '--dt-from'):
             dtFrom = arg
@@ -678,6 +731,8 @@ def main(argv):
             binaryLogsFilePath = arg
         elif opt in ('-o', '--output-path'):
             outputPath = arg
+        elif opt in ('-s', '--sql-operations'):
+            sqlOperations = arg
 
     Printer.default('+---------------------------------------------------+\n'
                     '|  G I V E N   W O R K I N G   P A R A M E T E R S  |\n'
@@ -686,11 +741,12 @@ def main(argv):
                     'Datetime to:\t\t\t\t\t{}\n'
                     'Binary logs path:\t\t\t\t{}\n'
                     'Binary logs filename (without extension):\t{}\n'
-                    'Output path:\t\t\t\t\t\t{}'
-                    .format(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath))
+                    'Output path:\t\t\t\t\t{}\n'
+                    'SQL operations:\t\t\t\t\t{}\n'
+                    .format(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath, sqlOperations))
     Printer.default('=====================================================')
 
-    run(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath)
+    run(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath, sqlOperations)
 # ======== END MAIN LOGIC ========
 
 
