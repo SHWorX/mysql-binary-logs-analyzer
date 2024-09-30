@@ -24,8 +24,6 @@ import subprocess
 import sys
 import time
 
-from packaging.version import parse
-
 
 # ========  CLASSES  ========
 class BColors:
@@ -444,7 +442,7 @@ def getBinaryLogs(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName):
         sys.exit(0)
 
     # Return sorted list
-    return sorted(binaryLogs, key=parse)
+    return sorted(binaryLogs)
 
 
 def writeFileList(binaryLogs, outputFile):
