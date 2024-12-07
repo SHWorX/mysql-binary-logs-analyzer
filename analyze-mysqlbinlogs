@@ -207,19 +207,19 @@ def getCreatedDateTime(file):
     return datetime.datetime.fromtimestamp(os.path.getctime(file))
 
 
-def decodeAndCombineBinaryLogs(binaryLogs, rawLog):
+def decodeAndCombineBinaryLogs(rawLog, binaryLogs):
     """This method calls the "mysqlbinlog" command with the option "-v" and the binary logs as arguments,
     and writes the output to "/output/path/mysql-raw.out".
 
     Parameter
     ---------
+    rawLog : str
+        Filename incl. path which will contain the decoded content of all given binary logs
     binaryLogs : list[str]
         List of binary logs
-    outputFile : str
-        Filename incl. path which will contain the decoded content of all given binary logs
     """
 
-    command = ['mysqlbinlog', '--base64-output=decode-rows', '-v']
+    command = ['mysqlbinlog', '--base64-output=decode-rows', '-v', '--skip-gtid-strict-mode']
     commandWithFileList = command + binaryLogs
 
     Printer.tool('Decoding binary logs and write the output to {} ... '.format(rawLog), endNewline=False)
@@ -235,13 +235,18 @@ def decodeAndCombineBinaryLogs(binaryLogs, rawLog):
             )
         outputFileHandle.close()
     except IOError as e:
-        Printer.error('Failed!\n{}: {}'.format(e.strerror, rawLog), prefix=False)
+        Printer.error('Failed! (IOError)\n{}: {}'.format(e.strerror, rawLog), prefix=False)
         sys.exit(1)
     except subprocess.CalledProcessError as e:
-        Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
-        sys.exit(1)
+        error = e.stderr.replace('\n', '')
+        if error == '':
+            Printer.warning('mysqlbinlog exited with 1, but without error message.'.format(error), prefix=False)
+
+        if error != '':
+            Printer.error('Failed! (subprocess)\n{}'.format(error), prefix=False)
+            sys.exit(1)
     else:
-        Printer.success('Done!')
+        Printer.success('Done.')
 
 
 def checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath, sqlOperations):
@@ -315,7 +320,7 @@ def checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName,
                     Printer.error('Invalid end datetime value "{}" given!'.format(dtTo))
                     sys.exit(1)
     else:
-        dtTo = endOfDay
+        dtTo = datetime.datetime.now().replace(hour=13, minute=0, microsecond=0)
 
     if dtFrom > dtTo:
         Printer.error(
@@ -363,7 +368,7 @@ def checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName,
         Printer.error('The output path "{}" can\'t be the filesystem root!'.format(outputFilePath))
         sys.exit(1)
 
-    if not os.path.exists(outputFilePath) or not os.access(outputFilePath, os.W_OK):
+    if os.path.exists(outputFilePath) is False or os.access(outputFilePath, os.W_OK) is False:
         Printer.error(
             'The output path "{}" does not exist, or is not writable by the current user "{}"!'
             .format(outputFilePath, currentUser)
@@ -462,7 +467,7 @@ def writeFileList(binaryLogs, outputFile):
             for line in binaryLogs:
                 txtFile.write(line + '\n')
         txtFile.close()
-        Printer.success('Done!')
+        Printer.success('Done.')
     except IOError as e:
         Printer.error('Can\'t write to "{}"! {}'.format(outputFile, e.strerror), startNewline=True)
         sys.exit(1)
@@ -478,6 +483,9 @@ def createReport(rawLog, reportFile, sqlOperations):
         Combined RAW binary log file (created by decodeAndCombineBinaryLogFiles())
     reportFile: str
         File to where the report shall be written.
+    sqlOperations: str
+        Comma separated list of SQL operations to be included in the report.
+        Possible values: all, select, insert, update, delete, drop, truncate
     """
 
     Printer.tool('Begin analyzing combined binary logs file and create report ...')
@@ -505,7 +513,7 @@ def createReport(rawLog, reportFile, sqlOperations):
                 Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
                 sys.exit(1)
             else:
-                Printer.success('Done!')
+                Printer.success('Done.')
                 reportFileHandle.flush()
 
         if any(ele in sqlOperations for ele in ['all', 'insert']):
@@ -528,7 +536,7 @@ def createReport(rawLog, reportFile, sqlOperations):
                 Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
                 sys.exit(1)
             else:
-                Printer.success('Done!')
+                Printer.success('Done.')
                 reportFileHandle.flush()
 
         if any(ele in sqlOperations for ele in ['all', 'delete']):
@@ -551,7 +559,7 @@ def createReport(rawLog, reportFile, sqlOperations):
                 Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
                 sys.exit(1)
             else:
-                Printer.success('Done!')
+                Printer.success('Done.')
                 reportFileHandle.flush()
 
         if any(ele in sqlOperations for ele in ['all', 'truncate']):
@@ -574,7 +582,7 @@ def createReport(rawLog, reportFile, sqlOperations):
                 Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
                 sys.exit(1)
             else:
-                Printer.success('Done!')
+                Printer.success('Done.')
                 reportFileHandle.flush()
 
         if any(ele in sqlOperations for ele in ['all', 'drop']):
@@ -597,7 +605,7 @@ def createReport(rawLog, reportFile, sqlOperations):
                 Printer.error('Failed!\n{}'.format(e.stderr.replace('\n', '')), prefix=False)
                 sys.exit(1)
             else:
-                Printer.success('Done!')
+                Printer.success('Done.')
                 reportFileHandle.flush()
 
     reportFileHandle.close()
@@ -618,7 +626,36 @@ def removeRawLogAndPrintFinalMessage(rawLog):
     except OSError as e:
         Printer.error('Failed!\n{}'.format(e.strerror), prefix=False)
     else:
-        Printer.success('Done!')
+        Printer.success('Done.')
+
+
+def createOutputFiles(rawLog: str, reportFile: str, fileListFile: str):
+    try:
+        Printer.default('Create RAW log file ...    ', endNewline=False)
+        with open(rawLog, 'w') as fp:
+            pass
+        Printer.success('OK')
+    except OSError as e:
+        Printer.error('Failed!\n{}'.format(e.strerror), prefix=False)
+        sys.exit(1)
+
+    try:
+        Printer.default('Create report file ...     ', endNewline=False)
+        with open(reportFile, 'w') as fp:
+            pass
+        Printer.success('OK')
+    except OSError as e:
+        Printer.error('Failed!\n{}'.format(e.strerror), prefix=False)
+        sys.exit(1)
+
+    try:
+        Printer.default('Create file list file ...  ', endNewline=False)
+        with open(fileListFile, 'w') as fp:
+            pass
+        Printer.success('OK')
+    except OSError as e:
+        Printer.error('Failed!\n{}'.format(e.strerror), prefix=False)
+        sys.exit(1)
 
 
 def run(dtFrom: str, dtTo: str, binaryLogsFilePath: str, binaryLogsFileName: str, outputPath: str, sqlOperations: str):
@@ -641,7 +678,6 @@ def run(dtFrom: str, dtTo: str, binaryLogsFilePath: str, binaryLogsFileName: str
     """
 
     params = checkWorkingParameters(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath, sqlOperations)
-    binaryLogs = getBinaryLogs(params[0], params[1], params[2], params[3])
 
     currentDate = datetime.date.today().strftime('%Y-%m-%d')
     currentTimeStamp = str(int(time.time()))
@@ -650,8 +686,12 @@ def run(dtFrom: str, dtTo: str, binaryLogsFilePath: str, binaryLogsFileName: str
     reportFile = params[4] + currentDate + '_' + currentTimeStamp + '_binary-logs-report.txt'
     fileListFile = params[4] + currentDate + '_' + currentTimeStamp + '_binary-logs-list.txt'
 
+    createOutputFiles(rawLogFile, reportFile, fileListFile)
+
+    binaryLogs = getBinaryLogs(params[0], params[1], params[2], params[3])
+
     writeFileList(binaryLogs, fileListFile)
-    decodeAndCombineBinaryLogs(binaryLogs, rawLogFile)
+    decodeAndCombineBinaryLogs(rawLogFile, binaryLogs)
     createReport(rawLogFile, reportFile, params[5])
     removeRawLogAndPrintFinalMessage(rawLogFile)
 
@@ -733,7 +773,7 @@ def main(argv):
                     'Binary logs path:\t\t\t\t{}\n'
                     'Binary logs filename (without extension):\t{}\n'
                     'Output path:\t\t\t\t\t{}\n'
-                    'SQL operations:\t\t\t\t\t{}\n'
+                    'SQL operations:\t\t\t\t\t{}'
                     .format(dtFrom, dtTo, binaryLogsFilePath, binaryLogsFileName, outputPath, sqlOperations))
     Printer.default('=====================================================')
 

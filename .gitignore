@@ -1,4 +1,6 @@
 .idea
 /venv/
-/tests
+/output/
+/test-binlogs/
 mysql-raw.log
+ToDo.txt
